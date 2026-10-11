@@ -100,3 +100,4 @@ if image is not None:
         for i, lab in enumerate(labels):
             score = float(output_data[i]) * 100 if output_data[i] <= 1.0 else float(output_data[i])
             st.write(f"- {lab.capitalize()}: {score:.2f}%")
+            # refresh-app-1
