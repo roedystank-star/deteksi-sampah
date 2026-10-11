@@ -3,6 +3,8 @@ import numpy as np
 from PIL import Image, ImageOps
 import tensorflow as tf
 
+st.set_page_config(page_title="Deteksi Sampah Organik & Anorganik", page_icon="♻️")
+
 st.title("Aplikasi Deteksi Sampah (Organik & Anorganik)")
 st.write("Arahkan kamera atau upload foto sampah untuk mendeteksi jenisnya.")
 
@@ -12,11 +14,9 @@ def load_model_and_labels():
     interpreter = tf.lite.Interpreter(model_path="model.tflite")
     interpreter.allocate_tensors()
     
-    # Membaca label dan memastikan tidak ada karakter kosong/angka indeks
+    # Membaca label dari file labels.txt
     with open("labels.txt", "r") as f:
         labels = [line.strip() for line in f.readlines() if line.strip()]
-        # Bersihkan jika masih ada angka di depannya (misal "0 organik" -> "organik")
-        labels = [lbl.split(' ', 1)[1] if lbl.split(' ')[0].isdigit() else lbl for lbl in labels]
         
     return interpreter, labels
 
@@ -25,7 +25,7 @@ try:
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
 except Exception as e:
-    st.error(f"Gagal memuat model: {e}")
+    st.error(f"Gagal memuat model atau label.txt: {e}")
     st.stop()
 
 # Ukuran input model Teachable Machine (biasanya 224x224)
@@ -38,7 +38,6 @@ def preprocess_image(img: Image.Image):
     
     input_dtype = input_details[0]['dtype']
     
-    # Penanganan tipe data input yang tepat untuk TFLite
     if input_dtype == np.float32:
         arr = arr.astype(np.float32) / 255.0
     else:
@@ -72,16 +71,12 @@ if image is not None:
     output_data = interpreter.get_tensor(output_details[0]['index'])[0]
     
     # Tangani kuantisasi output jika model uint8/int8
-    if output_details[0]['dtype'] == np.uint8:
-        scale, zero_point = output_details[0]['quantization']
-        output_data = scale * (output_data.astype(np.float32) - zero_point)
-    elif output_details[0]['dtype'] == np.int8:
+    if output_details[0]['dtype'] in [np.uint8, np.int8]:
         scale, zero_point = output_details[0]['quantization']
         output_data = scale * (output_data.astype(np.float32) - zero_point)
 
     # Konversi output ke rentang probabilitas 0 - 100%
     if np.max(output_data) > 1.0:
-        # Jika model mengeluarkan bentuk logit/raw score yang besar
         exp_vals = np.exp(output_data - np.max(output_data))
         probabilities = exp_vals / np.sum(exp_vals)
     else:
@@ -90,13 +85,15 @@ if image is not None:
     predicted_index = np.argmax(probabilities)
     confidence = float(probabilities[predicted_index]) * 100
     
-    # Tampilkan Hasil Utama
+    # Ambil label murni tanpa angka indeks
     predicted_label = labels[predicted_index] if predicted_index < len(labels) else "Tidak Diketahui"
     
+    # Tampilkan Hasil Utama
     st.subheader("Hasil Prediksi:")
     st.success(f"**Jenis Sampah: {predicted_label.upper()}** (Akurasi: {confidence:.2f}%)")
     
-    # Debug rincian untuk melihat apakah skornya benar-benar stuck
-    with st.expander("Cek Detail Probabilitas Murni"):
+    # Tampilkan rincian probabilitas dengan bersih tanpa nomor indeks
+    with st.expander("Lihat Rincian Probabilitas"):
         for i, lab in enumerate(labels):
-            st.write(f"- {lab}: {float(probabilities[i])*100:.2f}%")
+            score = float(probabilities[i]) * 100
+            st.write(f"- **{lab.capitalize()}**: {score:.2f}%")
